@@ -3044,32 +3044,40 @@ function getCallerInfo($number) {
 	if (empty($number)) {
 		return false;
 	}
-
-	$fieldsString = GlobalVariable::getVariable('PBXManager_SearchOnlyOnTheseFields', '');
+	$pbxNumberSeparator = GlobalVariable::getVariable('PBX_callerNumberSeparator', '', 'PBXManager');
+	if ($pbxNumberSeparator=='') {
+		$numArray = (array)$number;
+	} else {
+		$numArray = explode($pbxNumberSeparator, $number);
+	}
+	$fieldsString = GlobalVariable::getVariable('PBX_SearchOnTheseFields', '', 'PBXManager');
 	if ($fieldsString != '') {
 		$fieldsArray = explode(',', $fieldsString);
-		foreach ($fieldsArray as $field) {
-			$result = $adb->pquery("SELECT tabid, uitype FROM vtiger_field WHERE columnname = ?", array($field));
-			for ($i = 0; $i< $adb->num_rows($result); $i++) {
-				$module = vtlib_getModuleNameById($adb->query_result($result, $i, 0));
-				$uitype = $adb->query_result($result, $i, 1);
-				$focus = CRMEntity::getInstance($module);
-				$query = $focus->buildSearchQueryForFieldTypes($uitype, $number);
-				if (empty($query)) {
-					continue;
-				}
+		foreach ($numArray as $number) {
+			foreach ($fieldsArray as $field) {
+				$result = $adb->pquery("SELECT tabid, uitype FROM vtiger_field WHERE columnname = ?", array($field));
+				for ($i = 0; $i< $adb->num_rows($result); $i++) {
+					$module = vtlib_getModuleNameById($adb->query_result($result, $i, 0));
+					$uitype = $adb->query_result($result, $i, 1);
+					$focus = CRMEntity::getInstance($module);
+					$query = $focus->buildSearchQueryForFieldTypes($uitype, $number);
+					if (empty($query)) {
+						continue;
+					}
 
-				$result = $adb->pquery($query, array());
-				if ($adb->num_rows($result) > 0) {
-					$callerName = $adb->query_result($result, 0, 'name');
-					$callerID = $adb->query_result($result, 0, 'id');
-					return array('name'=>$callerName, 'module'=>$module, 'id'=>$callerID);
+					$result = $adb->pquery($query, array());
+					if ($adb->num_rows($result) > 0) {
+						$callerName = $adb->query_result($result, 0, 'name');
+						$callerID = $adb->query_result($result, 0, 'id');
+						return array('name'=>$callerName, 'module'=>$module, 'id'=>$callerID);
+					}
 				}
 			}
 		}
-	} else {
-		$name = array('Contacts', 'Accounts', 'Leads');
-		foreach ($name as $module) {
+	}
+	$name = array('Contacts', 'Accounts', 'Leads');
+	foreach ($name as $module) {
+		foreach ($numArray as $number) {
 			$focus = CRMEntity::getInstance($module);
 			$query = $focus->buildSearchQueryForFieldTypes(11, $number);
 			if (empty($query)) {
@@ -3084,7 +3092,6 @@ function getCallerInfo($number) {
 			}
 		}
 	}
-
 	return false;
 }
 
@@ -3162,9 +3169,9 @@ function addToCallHistory($userExtension, $callfrom, $callto, $status, $adb, $us
 		$callto = $unknownCaller;
 	}
 
+	$sql = 'select * from vtiger_asteriskextensions where asterisk_extension=?';
 	if ($status == 'outgoing') {
 		//call is from user to record
-		$sql = "select * from vtiger_asteriskextensions where asterisk_extension=?";
 		$result = $adb->pquery($sql, array($callfrom));
 		if ($adb->num_rows($result)>0) {
 			$userid = $adb->query_result($result, 0, "userid");
@@ -3179,23 +3186,23 @@ function addToCallHistory($userExtension, $callfrom, $callto, $status, $adb, $us
 		}
 	} else {
 		//call is from record to user
-		$sql = "select * from vtiger_asteriskextensions where asterisk_extension=?";
 		$result = $adb->pquery($sql, array($callto));
 		if ($adb->num_rows($result)>0) {
-			$userid = $adb->query_result($result, 0, "userid");
+			$userid = $adb->query_result($result, 0, 'userid');
 			$receiver = getUserFullName($userid);
 		}
 		$callerName = $useCallerInfo;
 		if (empty($callerName)) {
 			$callerName = $unknownCaller.' '.$callfrom;
 		} else {
-			$callerName = "<a href='index.php?module=".$callerName['module']."&action=DetailView&record=".$callerName['id']."'>".decode_html($callerName['name'])."</a>";
+			$callerName = "<a href='index.php?module=".$callerName['module'].'&action=DetailView&record='.$callerName['id']."'>".decode_html($callerName['name']).'</a>';
 		}
 	}
 
-	$sql = 'insert into vtiger_pbxmanager (pbxmanagerid,callfrom,callto,timeofcall,status)values (?,?,?,?,?)';
-	$params = array($crmID, $callerName, $receiver, $timeOfCall, $status);
+	$sql = 'insert into vtiger_pbxmanager (pbxmanagerid,callfrom,callto,timeofcall,status,pbxuuid) values (?,?,?,?,?,?)';
+	$params = array($crmID, $callerName, $receiver, $timeOfCall, $status, $pbxuuid);
 	$adb->pquery($sql, $params);
+	cbEventHandler::do_action('corebos.pbxmanager.aftersave', $params);
 	return $crmID;
 }
 //functions for asterisk integration end
@@ -3743,7 +3750,7 @@ function hasEmailField($module) {
 	global $adb;
 	$querystr = 'SELECT fieldid FROM vtiger_field WHERE tabid=? and uitype=13 and vtiger_field.presence in (0,2)';
 	$queryres = $adb->pquery($querystr, array(getTabid($module)));
-	return (($queryres && $adb->num_rows($queryres)>0) || $module=='Campaigns');
+	return (($queryres && $adb->num_rows($queryres)>0) || $module=='Campaigns' || $module=='Faq');
 }
 
 function getFirstEmailField($module) {
@@ -4004,17 +4011,16 @@ function retrieveCompanyDetails() {
 	);
 	if ($query && $adb->num_rows($query) > 0) {
 		$record = $adb->query_result($query, 0, 'cbcompanyid');
-		$companyDetails['name']     = $companyDetails['companyname'] = $adb->query_result($query, 0, 'companyname');
+		$companyDetails['name']     = $companyDetails['companyname'] = decode_html($adb->query_result($query, 0, 'companyname'));
 		$companyDetails['website']  = $adb->query_result($query, 0, 'website');
 		$companyDetails['email']  = $adb->query_result($query, 0, 'email');
 		$companyDetails['siccode']  = $adb->query_result($query, 0, 'siccode');
 		$companyDetails['accid']  = $adb->query_result($query, 0, 'accid');
-		$companyDetails['address']  = $adb->query_result($query, 0, 'address');
-		$companyDetails['city']     = $adb->query_result($query, 0, 'city');
-		$companyDetails['state']    = $adb->query_result($query, 0, 'state');
-		$companyDetails['country']  = $adb->query_result($query, 0, 'country');
-		$companyDetails['postalcode'] = $adb->query_result($query, 0, 'postalcode');
-		$companyDetails['code'] = $adb->query_result($query, 0, 'postalcode');
+		$companyDetails['address']  = decode_html($adb->query_result($query, 0, 'address'));
+		$companyDetails['city']     = decode_html($adb->query_result($query, 0, 'city'));
+		$companyDetails['state']    = decode_html($adb->query_result($query, 0, 'state'));
+		$companyDetails['country']  = decode_html($adb->query_result($query, 0, 'country'));
+		$companyDetails['postalcode'] = $companyDetails['code'] = decode_html($adb->query_result($query, 0, 'postalcode'));
 		$companyDetails['phone']    = $adb->query_result($query, 0, 'phone');
 		$companyDetails['fax']      = $adb->query_result($query, 0, 'fax');
 		for ($i=0; $i<$adb->num_rows($query); $i++) {

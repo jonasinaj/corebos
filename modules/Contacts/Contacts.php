@@ -28,6 +28,7 @@ class Contacts extends CRMEntity {
 	/** Indicator if this is a custom module or standard module */
 	public $IsCustomModule = false;
 	public $HasDirectImageField = true;
+	public $moduleIcon = array('library' => 'standard', 'containerClass' => 'slds-icon_container slds-icon-standard-contact', 'class' => 'slds-icon', 'icon'=>'contact');
 
 	/**
 	 * Mandatory table for supporting custom fields.
@@ -925,6 +926,15 @@ class Contacts extends CRMEntity {
 			where vtiger_crmentity.deleted=0 and vtiger_users.user_name='".$user_name."'";
 		$log->debug('< get_contactsforol');
 		return $query;
+	}
+
+	public function save($module, $fileid = '') {
+		global $adb;
+		if ($this->mode=='edit') {
+			$rs = $adb->pquery('select convertedfromlead from vtiger_contactdetails where contactid = ?', array($this->id));
+			$this->column_fields['convertedfromlead'] = $adb->query_result($rs, 0, 'convertedfromlead');
+		}
+		parent::save($module, $fileid);
 	}
 
 	/** Function to handle module specific operations when saving a entity */

@@ -39,17 +39,9 @@ function is_admin($user) {
  * Check if user id belongs to a system admin.
  */
 function is_adminID($userID) {
-	global $log;
-	if (empty($userID) || !is_numeric($userID)) {
-		return false;
-	}
-	$log->debug('> is_adminID ' . $userID);
-	$is_admin = false;
-	if (file_exists('user_privileges/user_privileges_' . $userID . '.php')) {
-		require 'user_privileges/user_privileges_' . $userID . '.php';
-	}
-	$log->debug('< is_adminID');
-	return ($is_admin == true);
+	require_once 'modules/Users/Users.php';
+	$privs = UserPrivileges::privsWithoutSharing($userID);
+	return $privs->isAdmin();
 }
 
 /**
@@ -1477,10 +1469,13 @@ function getParentTab() {
 function updateInfo($id) {
 	global $log, $adb, $app_strings;
 	$log->debug('> updateInfo ' . $id);
-	$query = 'SELECT modifiedtime, modifiedby FROM vtiger_crmentity WHERE crmid = ?';
+	$query = 'SELECT modifiedtime, modifiedby, smcreatorid FROM vtiger_crmentity WHERE crmid = ?';
 	$result = $adb->pquery($query, array($id));
 	$modifiedtime = $adb->query_result($result, 0, 'modifiedtime');
 	$modifiedby_id = $adb->query_result($result, 0, 'modifiedby');
+	if (empty($modifiedby_id)) {
+		$modifiedby_id = $adb->query_result($result, 0, 'smcreatorid');
+	}
 	$modifiedby = $app_strings['LBL_BY'] . getOwnerName($modifiedby_id);
 	$date = new DateTimeField($modifiedtime);
 	$modifiedtime = DateTimeField::convertToDBFormat($date->getDisplayDate());
@@ -2392,10 +2387,21 @@ function getMergedDescription($description, $id, $parent_type) {
 			$description = str_replace($token_data, $adb->query_result($result, 0, $columnname), $description);
 		}
 	}
-	if ($parent_type != 'Users' && preg_match('/\$\w+-\w+\$/', $description)==0) { // no old format anymore
-		$entityCache = new VTEntityCache($current_user);
+	//if ($parent_type != 'Users' && preg_match('/\$\w+-\w+\$/', $description)==0) { // no old format anymore
+	$entityCache = new VTEntityCache($current_user);
+	$ct = new VTSimpleTemplate($description, true);
+	$description = $ct->render($entityCache, vtws_getEntityId($parent_type).'x'.$id);
+	//}
+	$cmprs = $adb->pquery(
+		'SELECT c.cbcompanyid
+			FROM vtiger_cbcompany c
+			JOIN vtiger_crmentity on vtiger_crmentity.crmid = c.cbcompanyid
+			WHERE c.defaultcompany=1 and vtiger_crmentity.deleted=0',
+		array()
+	);
+	if ($cmprs && $adb->num_rows($cmprs)>0) {
 		$ct = new VTSimpleTemplate($description, true);
-		$description = $ct->render($entityCache, vtws_getEntityId($parent_type).'x'.$id);
+		$description = $ct->render($entityCache, vtws_getEntityId('cbCompany').'x'.$adb->query_result($cmprs, 0, 0));
 	}
 	$log->debug('< from getMergedDescription');
 	return $description;
@@ -2456,6 +2462,16 @@ function get_announcements() {
 		$announcement = vtlib_purify($announcement);
 	}
 	return $announcement;
+}
+
+function getModuleIcon($module) {
+	$curMod = CRMEntity::getInstance($module);
+	$iconinfo = array();
+	$iconinfo['__ICONLibrary'] = $curMod->moduleIcon['library'];
+	$iconinfo['__ICONContainerClass'] = $curMod->moduleIcon['containerClass'];
+	$iconinfo['__ICONClass'] = $curMod->moduleIcon['class'];
+	$iconinfo['__ICONName'] = $curMod->moduleIcon['icon'];
+	return $iconinfo;
 }
 
 /**
@@ -2746,7 +2762,7 @@ function is_emailId($entity_id) {
 
 /**
  * This function is used to get cvid of default "all" view for any module.
- * @return a cvid of a module
+ * @return integer cvid of a module
  */
 function getCvIdOfAll($module) {
 	global $adb, $log;
@@ -2757,30 +2773,21 @@ function getCvIdOfAll($module) {
 	return $cvid;
 }
 
-/** gives the option  to display  the tagclouds or not for the current user
- * * @param $id -- user id:: Type integer
- * * @returns true or false in $tag_cloud_view
- * * Added to provide User based Tagcloud
- * */
+/** gives the option  to display  the tagclouds or not for the given user
+ * @param $id -- user id:: Type integer
+ * @returns boolean
+ */
 function getTagCloudView($id = '') {
 	global $log, $adb;
 	$log->debug("> getTagCloudView $id");
 	if ($id == '') {
 		$tag_cloud_status = 1;
 	} else {
-		$query = "select visible from vtiger_homestuff where userid=? and stufftype='Tag Cloud'";
-		$tagcloudstatusrs = $adb->pquery($query, array($id));
+		$tagcloudstatusrs = $adb->pquery("select visible from vtiger_homestuff where userid=? and stufftype='Tag Cloud'", array($id));
 		$tag_cloud_status = $adb->query_result($tagcloudstatusrs, 0, 'visible');
 	}
-
-	if ($tag_cloud_status == 0) {
-		$tag_cloud_view = 'true';
-	} else {
-		$tag_cloud_view = 'false';
-	}
-
 	$log->debug('< getTagCloudView');
-	return $tag_cloud_view;
+	return ($tag_cloud_status == 0);
 }
 
 /** Stores the option in database to display  the tagclouds or not for the current user
@@ -3412,10 +3419,9 @@ function getReturnPath($host, $from_email) {
 
 function picklistHasDependency($keyfldname, $modulename) {
 	global $adb;
-	$tabid = getTabid($modulename);
 	$result = $adb->pquery(
-		'SELECT tabid FROM vtiger_picklist_dependency WHERE tabid = ? AND (sourcefield = ? OR targetfield = ?) limit 1',
-		array($tabid, $keyfldname, $keyfldname)
+		'SELECT tabid FROM vtiger_picklist_dependency WHERE tabid=? AND (sourcefield=? OR targetfield=?) limit 1',
+		array(getTabid($modulename), $keyfldname, $keyfldname)
 	);
 	return ($adb->num_rows($result) > 0);
 }

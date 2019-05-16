@@ -37,6 +37,8 @@ class Users extends CRMEntity {
 	public $tab_name = array('vtiger_users', 'vtiger_attachments', 'vtiger_user2role', 'vtiger_asteriskextensions');
 	public $tab_name_index = array('vtiger_users'=>'id', 'vtiger_attachments'=>'attachmentsid', 'vtiger_user2role'=>'userid', 'vtiger_asteriskextensions'=>'userid');
 
+	public $moduleIcon = array('library' => 'standard', 'containerClass' => 'slds-icon_container slds-icon-standard-user', 'class' => 'slds-icon', 'icon'=>'user');
+
 	public $table_name = 'vtiger_users';
 	public $table_index = 'id';
 
@@ -238,7 +240,6 @@ class Users extends CRMEntity {
 		// encrypt the password.
 		$salt = substr($this->column_fields["user_name"], 0, 2);
 
-		// Fix for: http://trac.vtiger.com/cgi-bin/trac.cgi/ticket/4923
 		if ($crypt_type == '') {
 			// Try to get the crypt_type which is in database for the user
 			$crypt_type = $this->get_user_crypt_type();
@@ -490,7 +491,6 @@ class Users extends CRMEntity {
 
 	/**
 	 * Get crypt type to use for password for the user.
-	 * Fix for: http://trac.vtiger.com/cgi-bin/trac.cgi/ticket/4923
 	 */
 	public function get_user_crypt_type() {
 		$crypt_res = null;
@@ -754,7 +754,7 @@ class Users extends CRMEntity {
 				);
 			}
 		}
-		$this->column_fields['imagenameimagenfo'] = $imageurl;
+		$this->column_fields['imagenameimageinfo'] = $imageurl;
 		return $this;
 	}
 
@@ -1233,7 +1233,7 @@ class Users extends CRMEntity {
 		if ($id == '' && isset($this->column_fields['tagcloudview'])) {
 			$return_array['Tag Cloud'] = $this->column_fields['tagcloudview'];
 		} else {
-			$return_array['Tag Cloud'] = getTagCloudView($id);
+			$return_array['Tag Cloud'] = (getTagCloudView($id) ? 'true' : 'false');
 		}
 		if ($id == '' && isset($this->column_fields['showtagas'])) {
 			$return_array['showtagas'] = $this->column_fields['showtagas'];

@@ -1383,7 +1383,7 @@ function InventorySelectAll(mod, image_pth) {
 		this.specialKeys = ['up', 'down', 'esc', 'enter'],
 		this.threshold = 3,
 		this.input = el.getElementsByTagName('input')[0],
-		this.source = 'index.php?module=Utilities&action=UtilitiesAjax&file=ExecuteFunctions&functiontocall=getProductServiceAutocomplete&limit=10&term=',
+		this.source = 'index.php?module=Utilities&sourceModule='+gVTModule+'&action=UtilitiesAjax&file=ExecuteFunctions&functiontocall=getProductServiceAutocomplete&limit=10&term=',
 		this.active = false,
 		this.resultContainer,
 		this.resultBox,
@@ -1866,7 +1866,7 @@ function handleProductAutocompleteSelect(obj) {
 	document.getElementById('productName'+no).value = obj.result.meta.name;
 	document.getElementById('comment'+no).innerHTML = obj.result.meta.comments;
 	var currency = document.getElementById('inventory_currency').value;
-	if (obj.result.pricing.multicurrency[currency] != undefined) {
+	if (obj.result.pricing.multicurrency[currency] != undefined && gVTModule != "PurchaseOrder") {
 		document.getElementById('listPrice'+no).value = obj.result.pricing.multicurrency[currency].actual_price;
 	} else {
 		var list_price = obj.result.pricing.unit_price;
